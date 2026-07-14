@@ -20,7 +20,7 @@ class Model(nn.Module):
         return x
 
 # Pick a manual seed for randomization
-torch.manual_seed(41)
+torch.manual_seed(32)
 #Create the instance of the Model
 model = Model()
 # Load the dataset
@@ -39,7 +39,7 @@ y = my_def['species']
 x = x.values
 y = y.values
 # Train and validation split -> Training(80%) and Validation(20%)
-x_train, x_test, y_train, y_test = train_test_split(x,y,test_size=0.2, random_state=41)
+x_train, x_test, y_train, y_test = train_test_split(x,y,test_size=0.2, random_state=32)
 x_train = torch.FloatTensor(x_train)
 x_test = torch.FloatTensor(x_test)
 y_train = torch.LongTensor(y_train)
@@ -74,5 +74,20 @@ with torch.no_grad():
         if y_val.argmax().item() == y_test[i]:
             correct+=1
 print(f"We got {correct} correct")
-    
+#Evaluate new data on the model
+index_to_species = {
+    0: 'setosa',
+    1: 'versicolor',
+    2: 'virginica'
+}
+#first create a manual new data points
+new_iris = torch.tensor([4.7,3.2,1.3,6.2])
+# feed it to the model
+with torch.no_grad():
+    raw_output = model(new_iris)
+    # find the predicted index
+    predicted_index = raw_output.argmax().item()
+    # Map the index back to the species name
+    predicted_species = index_to_species[predicted_index]
+    print(f"The predicted species is: {predicted_species}")
 
