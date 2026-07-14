@@ -90,4 +90,9 @@ with torch.no_grad():
     # Map the index back to the species name
     predicted_species = index_to_species[predicted_index]
     print(f"The predicted species is: {predicted_species}")
-
+# Save the model
+torch.save(model.state_dict(),'iris_model.pt')
+# Load the model and evaluate it
+new_model = Model()
+new_model.load_state_dict(torch.load('iris_model.pt'))
+print(new_model.eval())
