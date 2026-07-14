@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
+from sklearn.model_selection import train_test_split
 # Create a class that inherit the nn.Module
 class Model(nn.Module):
     # 4 input layer, in_features = 4
@@ -26,8 +27,40 @@ model = Model()
 url = "https://gist.githubusercontent.com/curran/a08a1080b88344b0c8a7/raw/0e7a9b0a5d22642a06d3d5b9bcbad9890c8ee534/iris.csv"
 my_def = pd.read_csv(url)
 # Modify the dataset 
-my_def['species'] = my_def['species'].replace('setosa',0.0)
-my_def['species'] = my_def['species'].replace('versicolor',1.0)
-my_def['species'] = my_def['species'].replace('virginica',2.0)
-# Train test split! 
-
+my_def['species'] = my_def['species'].map({
+    'setosa': 0,
+    'versicolor': 1,
+    'virginica': 2
+})
+# Train test split -> 'x' for input features and 'y' for outcomes 
+x = my_def.drop('species',axis=1)
+y = my_def['species']
+# Convert this to the numpy array
+x = x.values
+y = y.values
+# Train and validation split -> Training(80%) and Validation(20%)
+x_train, x_test, y_train, y_test = train_test_split(x,y,test_size=0.2, random_state=41)
+x_train = torch.FloatTensor(x_train)
+x_test = torch.FloatTensor(x_test)
+y_train = torch.LongTensor(y_train)
+y_test = torch.LongTensor(y_test)
+#Set the criterion to measure the model
+criterion = nn.CrossEntropyLoss()
+# Choose and optimizer(adam) and set the learning the rate
+optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+# print(model.parameters)
+# Train our model
+# Epochs ? (one run through all the training data in our neural n/w)
+epochs = 100
+losses = []
+for i in range(epochs):
+    # Go_forward and get the perdiction
+    y_pred = model.forward(x_train)
+    # Measure the loss/error
+    loss = criterion(y_pred, y_train)
+    losses.append(loss.detach().numpy())
+    # Do the backpropagation to fine tunning the weights
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step() 
+    
