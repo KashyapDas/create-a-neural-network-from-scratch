@@ -63,4 +63,16 @@ for i in range(epochs):
     optimizer.zero_grad()
     loss.backward()
     optimizer.step() 
+# Evaluate/Validate Model on test data set
+with torch.no_grad():
+    y_eval = model.forward(x_test)
+    loss = criterion(y_eval, y_test)
+correct = 0
+with torch.no_grad():
+    for i,data in enumerate(x_test):
+        y_val = model.forward(data)
+        if y_val.argmax().item() == y_test[i]:
+            correct+=1
+print(f"We got {correct} correct")
     
+
