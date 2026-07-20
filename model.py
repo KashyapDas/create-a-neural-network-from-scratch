@@ -1,98 +1,134 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import pandas as pd
+import torch.optim as optim
 from sklearn.model_selection import train_test_split
-# Create a class that inherit the nn.Module
-class Model(nn.Module):
-    # 4 input layer, in_features = 4
-    # 2 Hidden layer, 1st layer has 8 neurons, 2nd layer has 9 neurons
-    # 3 output layer, out_features = 3
-    def __init__(self,in_features=4,h1=8,h2=9,out_features=3):
-        super().__init__()
-        self.fc1 = nn.Linear(in_features,h1)
-        self.fc2 = nn.Linear(h1,h2)
-        self.out = nn.Linear(h2,out_features)
-    def forward(self,x):
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.out(x)
-        return x
+from torch.utils.data import Dataset, DataLoader
+import optuna
+import pandas as pd
 
-# Pick a manual seed for randomization
-torch.manual_seed(32)
-#Create the instance of the Model
-model = Model()
-# Load the dataset
-url = "https://gist.githubusercontent.com/curran/a08a1080b88344b0c8a7/raw/0e7a9b0a5d22642a06d3d5b9bcbad9890c8ee534/iris.csv"
-my_def = pd.read_csv(url)
-# Modify the dataset 
-my_def['species'] = my_def['species'].map({
-    'setosa': 0,
-    'versicolor': 1,
-    'virginica': 2
-})
-# Train test split -> 'x' for input features and 'y' for outcomes 
-x = my_def.drop('species',axis=1)
-y = my_def['species']
-# Convert this to the numpy array
-x = x.values
-y = y.values
-# Train and validation split -> Training(80%) and Validation(20%)
-x_train, x_test, y_train, y_test = train_test_split(x,y,test_size=0.2, random_state=32)
-x_train = torch.FloatTensor(x_train)
-x_test = torch.FloatTensor(x_test)
-y_train = torch.LongTensor(y_train)
-y_test = torch.LongTensor(y_test)
-#Set the criterion to measure the model
-criterion = nn.CrossEntropyLoss()
-# Choose and optimizer(adam) and set the learning the rate
-optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
-# print(model.parameters)
-# Train our model
-# Epochs ? (one run through all the training data in our neural n/w)
-epochs = 100
-losses = []
-for i in range(epochs):
-    # Go_forward and get the perdiction
-    y_pred = model.forward(x_train)
-    # Measure the loss/error
-    loss = criterion(y_pred, y_train)
-    losses.append(loss.detach().numpy())
-    # Do the backpropagation to fine tunning the weights
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step() 
-# Evaluate/Validate Model on test data set
-with torch.no_grad():
-    y_eval = model.forward(x_test)
-    loss = criterion(y_eval, y_test)
-correct = 0
-with torch.no_grad():
-    for i,data in enumerate(x_test):
-        y_val = model.forward(data)
-        if y_val.argmax().item() == y_test[i]:
-            correct+=1
-print(f"We got {correct} correct")
-#Evaluate new data on the model
-index_to_species = {
-    0: 'setosa',
-    1: 'versicolor',
-    2: 'virginica'
-}
-#first create a manual new data points
-new_iris = torch.tensor([4.7,3.2,1.3,6.2])
-# feed it to the model
-with torch.no_grad():
-    raw_output = model(new_iris)
-    # find the predicted index
-    predicted_index = raw_output.argmax().item()
-    # Map the index back to the species name
-    predicted_species = index_to_species[predicted_index]
-    print(f"The predicted species is: {predicted_species}")
-# Save the model
-torch.save(model.state_dict(),'iris_model.pt')
-# Load the model and evaluate it
-new_model = Model()
-new_model.load_state_dict(torch.load('iris_model.pt'))
-print(new_model.eval())
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+# Loading the train and test (dataset)
+train_dataset = pd.read_csv("fashion-mnist_train.csv")
+test_dataset = pd.read_csv("fashion-mnist_test.csv")
+
+#training data
+x_train = train_dataset.drop(columns=['label'])
+y_train = train_dataset['label']
+#testing data
+x_test = test_dataset.drop(columns=['label'])
+y_test = test_dataset['label']
+
+# scaling the train data
+x_train = x_train / 255.0
+x_test = x_test / 255.0
+
+# Check if they are in numpy/pandas and if then convert them to the tensor
+x_train = x_train.to_numpy()
+x_test = x_test.to_numpy()
+
+x_train_tensor = torch.from_numpy(x_train).float()
+x_test_tensor = torch.from_numpy(x_test).float()
+
+y_train_tensor = torch.tensor(y_train.values, dtype=torch.long)
+y_test_tensor = torch.tensor(y_test.values, dtype=torch.long)
+
+# Defining the CustomClass
+class customDataset(Dataset):
+  def __init__(self, features, labels):
+    self.features = features
+    self.labels = labels
+
+  def __len__(self):
+    return self.features.shape[0]
+
+  def __getitem__(self, index):
+    return self.features[index], self.labels[index]
+
+xy_train_dataset = customDataset(x_train_tensor, y_train_tensor)
+xy_test_dataset = customDataset(x_test_tensor, y_test_tensor)
+
+# defining the model
+class Model(nn.Module):
+  def __init__(self, input_dimension, output_dimension, no_hidden_layers, neuron_per_layer, dropout_rate):
+    super().__init__()
+    layer = []
+    for i in range(no_hidden_layers):
+      layer.append(nn.Linear(input_dimension, neuron_per_layer))
+      layer.append(nn.BatchNorm1d(neuron_per_layer))
+      layer.append(nn.ReLU())
+      layer.append(nn.Dropout(dropout_rate))
+      input_dimension = neuron_per_layer
+    layer.append(nn.Linear(neuron_per_layer, output_dimension))
+    self.model = nn.Sequential(*layer)
+
+  def forward(self,x):
+    return self.model(x)
+
+# defining the objective for the optuna inside which the training/testing loop is defined
+def objective(trial):
+  print(f"Trial : {trial.number}")
+  # defining the range for all the important parameters of the model
+  no_hidden_layers = trial.suggest_int("no_hidden_layers", 1, 5)
+  neuron_per_layer = trial.suggest_int("neuron_per_layer", 8, 128, step=8)
+  epochs = trial.suggest_int("epochs", 10, 50, step=10)
+  learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-1, log=True)
+  dropout_rate = trial.suggest_float("dropout_rate", 0.1, 0.5, step=0.1)
+  batch_size = trial.suggest_categorical("batch_size",[16,32,64,128])
+  optimizer = trial.suggest_categorical("optimizer",['Adam','SGD','RMSprop'])
+  weight_decay = trial.suggest_float("weight_decay",1e-5, 1e-3, log=True)
+
+  # Defining the DataLoader Class
+  train_dataloader = DataLoader(xy_train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
+  test_dataloader = DataLoader(xy_test_dataset, batch_size=batch_size, shuffle=False, pin_memory=True)
+  # input and output dimension
+  input_dimension = x_train_tensor.shape[1]
+  output_dimension = len(torch.unique(y_train_tensor))
+  # defining the model
+  model = Model(input_dimension, output_dimension, no_hidden_layers, neuron_per_layer, dropout_rate)
+  model = model.to(device)
+  # defining the loss function
+  criterion = nn.CrossEntropyLoss()
+  # defining the optimizer
+  if optimizer == 'Adam':
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+  elif optimizer == 'SGD':
+    optimizer = optim.SGD(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+  else:
+    optimizer = optim.RMSprop(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+  #set the model in the training mode
+  model.train()
+  # do the training loop
+  for epoch in range(epochs):
+    for batch_features, batch_labels in train_dataloader:
+      batch_features, batch_labels = batch_features.to(device), batch_labels.to(device)
+
+      prediction = model.forward(batch_features)
+      loss = criterion(prediction, batch_labels)
+      optimizer.zero_grad()
+      loss.backward()
+      torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+      optimizer.step()
+    # print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
+
+  # set the model to the testing mode
+  model.eval()
+  # do the evaluation/testing model
+  total = correct = 0
+  with torch.no_grad():
+    for batch_features, batch_labels in test_dataloader:
+      batch_features, batch_labels = batch_features.to(device), batch_labels.to(device)
+
+      output = model(batch_features)
+      _, predicted = torch.max(output,1)
+      total = total + batch_labels.shape[0]
+      correct = correct + (predicted == batch_labels).sum().item()
+    accuracy = correct/total
+    print(f"Accuracy is : {accuracy}")
+  return accuracy
+
+# create a study using optuna
+study = optuna.create_study(direction = "maximize")
+study.optimize(objective, n_trials=10)
