@@ -132,3 +132,73 @@ def objective(trial):
 # create a study using optuna
 study = optuna.create_study(direction = "maximize")
 study.optimize(objective, n_trials=10)
+
+
+# --- ADD THIS AFTER YOUR OPTUNA STUDY ---
+
+print("\n--- OPTUNA SEARCH FINISHED ---")
+print("Best Trial:", study.best_trial.number)
+print("Best Accuracy:", study.best_trial.value)
+print("Best Parameters:", study.best_params)
+
+# 1. Extract the best hyperparameters
+best_params = study.best_params
+
+# 2. Re-create the DataLoader with the best batch size
+final_train_dataloader = DataLoader(
+    xy_train_dataset, 
+    batch_size=best_params["batch_size"], 
+    shuffle=True, 
+    pin_memory=True
+)
+
+# 3. Re-initialize the Model with the best architecture parameters
+input_dimension = x_train_tensor.shape[1]
+output_dimension = len(torch.unique(y_train_tensor))
+
+final_model = Model(
+    input_dimension=input_dimension,
+    output_dimension=output_dimension,
+    no_hidden_layers=best_params["no_hidden_layers"],
+    neuron_per_layer=best_params["neuron_per_layer"],
+    dropout_rate=best_params["dropout_rate"]
+)
+final_model = final_model.to(device)
+
+# 4. Re-initialize the Loss and best Optimizer
+criterion = nn.CrossEntropyLoss()
+
+if best_params["optimizer"] == 'Adam':
+    final_optimizer = optim.Adam(final_model.parameters(), lr=best_params["learning_rate"], weight_decay=best_params["weight_decay"])
+elif best_params["optimizer"] == 'SGD':
+    final_optimizer = optim.SGD(final_model.parameters(), lr=best_params["learning_rate"], weight_decay=best_params["weight_decay"])
+else:
+    final_optimizer = optim.RMSprop(final_model.parameters(), lr=best_params["learning_rate"], weight_decay=best_params["weight_decay"])
+
+# 5. Train the final model using the best number of epochs
+print(f"\nTraining final model for {best_params['epochs']} epochs...")
+final_model.train()
+
+for epoch in range(best_params["epochs"]):
+    running_loss = 0.0
+    for batch_features, batch_labels in final_train_dataloader:
+        batch_features, batch_labels = batch_features.to(device), batch_labels.to(device)
+
+        # Forward pass
+        prediction = final_model(batch_features)
+        loss = criterion(prediction, batch_labels)
+        
+        # Backward pass
+        final_optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(final_model.parameters(), max_norm=1.0)
+        final_optimizer.step()
+        
+        running_loss += loss.item()
+        
+    # Print average loss for the epoch so you can watch it train
+    print(f"Epoch {epoch+1}/{best_params['epochs']} - Loss: {running_loss/len(final_train_dataloader):.4f}")
+
+# 6. Save the trained weights to a file so others can use it
+torch.save(final_model.state_dict(), "model.pt")
+print("\nModel successfully saved as 'model.pt'!")
